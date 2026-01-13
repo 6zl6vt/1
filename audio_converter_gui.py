@@ -297,7 +297,18 @@ class AudioConverterGUI:
             ]
             
             if self.preserve_metadata_var.get():
-                cmd += ["-map_metadata", "0", "-map_chapters", "0", "-write_id3v1", "1", "-id3v2_version", "3"]
+                cmd += [
+                    "-map_metadata", "0",
+                    "-map", "0:a",
+                    "-map", "0:v?",
+                    "-map", "0:t?",
+                    "-c:v", "copy",
+                    "-c:t", "copy",
+                    "-id3v2_version", "3",
+                    "-write_id3v1", "1",
+                    "-metadata:s:v", "title='Album cover'",
+                    "-metadata:s:v", "comment='Cover (front)'"
+                ]
             
             cmd += ["-codec:a", codec]
             
@@ -326,6 +337,7 @@ class AudioConverterGUI:
             cmd.append(str(dst))
             
             self.log_message(f"转换中: {src.name}")
+            self.log_message(f"命令: {' '.join(cmd[:10])}...")  # 显示前10个参数
             
             creationflags = self.get_creation_flags()
             
