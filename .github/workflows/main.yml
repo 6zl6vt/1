@@ -33,20 +33,22 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller
     
-    - name: 构建可执行文件 (无图标)
+    - name: 构建可执行文件
       run: |
         pyinstaller --onefile --windowed --name="AudioToOpusConverter" audio2opus_gui.py
         echo "构建完成，文件大小:"
-        Get-ChildItem dist\AudioToOpusConverter.exe | Format-List Length
+        Get-ChildItem dist\AudioToOpusConverter.exe | ForEach-Object { 
+          $sizeMB = $_.Length / 1MB
+          Write-Host "文件大小: $($sizeMB.ToString('F2')) MB" 
+        }
     
     - name: 创建便携版
       run: |
-        New-Item -ItemType Directory -Force -Path portable
-        Copy-Item -Path dist\AudioToOpusConverter.exe -Destination portable\
+        mkdir -Force portable
+        Copy-Item dist\AudioToOpusConverter.exe portable\
         if (Test-Path README.md) {
-          Copy-Item -Path README.md -Destination portable\
+          Copy-Item README.md portable\
         }
-        # 创建说明文件
         @"
 注意: 此程序需要 ffmpeg 才能正常工作！
 请从 https://ffmpeg.org/download.html 下载 ffmpeg
