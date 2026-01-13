@@ -297,7 +297,7 @@ class AudioConverterGUI:
             ]
             
             if self.preserve_metadata_var.get():
-                cmd += ["-map_metadata", "0", "-map_chapters", "0"]
+                cmd += ["-map_metadata", "0", "-map_chapters", "0", "-id3v2_version", "3"]
             
             cmd += ["-codec:a", codec]
             
@@ -311,6 +311,7 @@ class AudioConverterGUI:
                     cmd += ["-b:a", bitrate]
                 else:
                     cmd += ["-q:a", str(quality)]
+                cmd += ["-id3v2_version", "3"]
             elif format_type == "flac":
                 cmd += ["-compression_level", str(complexity)]
             elif format_type == "aac":
@@ -336,6 +337,10 @@ class AudioConverterGUI:
             
             if process.returncode == 0:
                 self.log_message(f"✓ 完成: {dst.name}")
+                
+                if self.preserve_metadata_var.get():
+                    self.log_message("✓ 歌曲属性已保留")
+                    
                 return True
             else:
                 error_msg = process.stderr[:200] if process.stderr else "未知错误"
