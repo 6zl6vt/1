@@ -29,6 +29,14 @@ def build_exe():
         "--add-data=ffprobe.exe;.",
         "--clean",
         "--noconfirm",
+        "--hidden-import=mutagen",
+        "--hidden-import=mutagen.id3",
+        "--hidden-import=mutagen.mp3",
+        "--hidden-import=mutagen.flac",
+        "--hidden-import=mutagen.oggvorbis",
+        "--hidden-import=mutagen.oggopus",
+        "--hidden-import=mutagen.mp4",
+        "--hidden-import=mutagen.wave",
     ]
     
     try:
