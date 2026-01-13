@@ -5,8 +5,8 @@ import sys
 import threading
 from pathlib import Path
 import os
-import json
 import tempfile
+import json
 
 class AudioConverterGUI:
     def __init__(self, root):
@@ -286,85 +286,6 @@ class AudioConverterGUI:
     def is_same_format(self, p, target_ext):
         return p.suffix.lower() == target_ext.lower()
         
-    def extract_metadata(self, src):
-        try:
-            cmd = [
-                self.ffmpeg_path,
-                "-i", str(src),
-                "-f", "ffmetadata",
-                "-"
-            ]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore',
-                creationflags=self.get_creation_flags()
-            )
-            
-            if result.returncode != 0:
-                return None
-            
-            metadata = {}
-            for line in result.stdout.split('\n'):
-                if '=' in line and not line.startswith(';'):
-                    key, value = line.split('=', 1)
-                    metadata[key.strip()] = value.strip()
-            
-            return metadata
-        except Exception as e:
-            self.log_message(f"提取元数据失败: {e}")
-            return None
-    
-    def write_metadata(self, dst, metadata):
-        if not metadata:
-            return False
-            
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-                f.write(";FFMETADATA1\n")
-                for key, value in metadata.items():
-                    if key and value:
-                        f.write(f"{key}={value}\n")
-                metadata_file = f.name
-            
-            cmd = [
-                self.ffmpeg_path,
-                "-y",
-                "-i", str(dst),
-                "-i", metadata_file,
-                "-map_metadata", "1",
-                "-c", "copy",
-                "-id3v2_version", "3",
-                str(dst) + ".temp"
-            ]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore',
-                creationflags=self.get_creation_flags()
-            )
-            
-            os.remove(metadata_file)
-            
-            if result.returncode == 0:
-                os.remove(dst)
-                os.rename(str(dst) + ".temp", dst)
-                return True
-            else:
-                if os.path.exists(str(dst) + ".temp"):
-                    os.remove(str(dst) + ".temp")
-                return False
-                
-        except Exception as e:
-            self.log_message(f"写入元数据失败: {e}")
-            return False
-        
     def convert_file(self, src, dst, format_type, codec, bitrate, complexity, quality, overwrite):
         if dst.exists() and not overwrite:
             self.log_message(f"跳过 (已存在): {dst.name}")
@@ -372,67 +293,148 @@ class AudioConverterGUI:
             
         try:
             if self.preserve_metadata_var.get():
-                metadata = self.extract_metadata(src)
-                if metadata:
-                    self.log_message(f"✓ 提取到 {len(metadata)} 条元数据")
-                else:
-                    self.log_message("⚠ 未提取到元数据")
-            
-            cmd = [
-                self.ffmpeg_path,
-                "-y" if overwrite else "-n",
-                "-i", str(src),
-            ]
-            
-            cmd += ["-codec:a", codec]
-            
-            if format_type == "ogg":
-                if codec == "libopus":
-                    cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on", "-application", "audio"]
-                elif codec == "libvorbis":
-                    cmd += ["-q:a", str(quality)]
-            elif format_type == "mp3":
-                if bitrate:
-                    cmd += ["-b:a", bitrate]
-                else:
-                    cmd += ["-q:a", str(quality)]
-            elif format_type == "flac":
-                cmd += ["-compression_level", str(complexity)]
-            elif format_type == "aac":
-                if bitrate:
-                    cmd += ["-b:a", bitrate]
-            elif format_type == "wav":
-                pass
-            
-            cmd.append(str(dst))
-            
-            self.log_message(f"转换中: {src.name}")
-            
-            creationflags = self.get_creation_flags()
-            
-            process = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore',
-                creationflags=creationflags
-            )
-            
-            if process.returncode == 0:
-                self.log_message(f"✓ 音频转换完成: {dst.name}")
+                self.log_message(f"转换中: {src.name} (保留元数据)")
                 
-                if self.preserve_metadata_var.get() and metadata:
-                    if self.write_metadata(dst, metadata):
-                        self.log_message("✓ 歌曲属性已写入")
-                    else:
-                        self.log_message("⚠ 歌曲属性写入失败")
+                temp_aiff = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix='.aiff', delete=False) as tmp:
+                        temp_aiff = tmp.name
                     
-                return True
+                    cmd_aiff = [
+                        self.ffmpeg_path,
+                        "-y",
+                        "-i", str(src),
+                        "-acodec", "pcm_s24be",
+                        "-ar", "44100",
+                        "-ac", "2",
+                        "-f", "aiff",
+                        temp_aiff
+                    ]
+                    
+                    process_aiff = subprocess.run(
+                        cmd_aiff,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='ignore',
+                        creationflags=self.get_creation_flags()
+                    )
+                    
+                    if process_aiff.returncode != 0:
+                        self.log_message(f"AIFF转换失败: {process_aiff.stderr[:200]}")
+                        return False
+                    
+                    self.log_message("✓ AIFF中间文件创建成功")
+                    
+                    cmd = [
+                        self.ffmpeg_path,
+                        "-y",
+                        "-i", temp_aiff,
+                    ]
+                    
+                    cmd += ["-codec:a", codec]
+                    
+                    if format_type == "ogg":
+                        if codec == "libopus":
+                            cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on", "-application", "audio"]
+                        elif codec == "libvorbis":
+                            cmd += ["-q:a", str(quality)]
+                    elif format_type == "mp3":
+                        if bitrate:
+                            cmd += ["-b:a", bitrate]
+                        else:
+                            cmd += ["-q:a", str(quality)]
+                        cmd += ["-id3v2_version", "3", "-write_id3v1", "1"]
+                    elif format_type == "flac":
+                        cmd += ["-compression_level", str(complexity)]
+                    elif format_type == "aac":
+                        if bitrate:
+                            cmd += ["-b:a", bitrate]
+                        cmd += ["-movflags", "+faststart"]
+                    elif format_type == "wav":
+                        pass
+                    
+                    cmd += [
+                        "-map_metadata", "0",
+                        "-map", "0:a",
+                        "-map", "0:v?",
+                        "-map", "0:t?",
+                        "-c:v", "copy",
+                        "-c:t", "copy",
+                        "-metadata", f"title={src.stem}",
+                        "-metadata", "artist=转换器",
+                        "-metadata", f"album={src.parent.name}",
+                        str(dst)
+                    ]
+                    
+                    process = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='ignore',
+                        creationflags=self.get_creation_flags()
+                    )
+                    
+                    if process.returncode == 0:
+                        self.log_message(f"✓ 完成: {dst.name}")
+                        self.log_message("✓ 歌曲属性已保留")
+                        return True
+                    else:
+                        error_msg = process.stderr[:500] if process.stderr else "未知错误"
+                        self.log_message(f"✗ 最终转换失败: {error_msg}")
+                        return False
+                        
+                finally:
+                    if temp_aiff and os.path.exists(temp_aiff):
+                        os.remove(temp_aiff)
+                
             else:
-                error_msg = process.stderr[:500] if process.stderr else "未知错误"
-                self.log_message(f"✗ 失败: {src.name} - {error_msg}")
-                return False
+                self.log_message(f"转换中: {src.name} (不保留元数据)")
+                
+                cmd = [
+                    self.ffmpeg_path,
+                    "-y" if overwrite else "-n",
+                    "-i", str(src),
+                    "-codec:a", codec,
+                ]
+                
+                if format_type == "ogg":
+                    if codec == "libopus":
+                        cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on", "-application", "audio"]
+                    elif codec == "libvorbis":
+                        cmd += ["-q:a", str(quality)]
+                elif format_type == "mp3":
+                    if bitrate:
+                        cmd += ["-b:a", bitrate]
+                    else:
+                        cmd += ["-q:a", str(quality)]
+                elif format_type == "flac":
+                    cmd += ["-compression_level", str(complexity)]
+                elif format_type == "aac":
+                    if bitrate:
+                        cmd += ["-b:a", bitrate]
+                elif format_type == "wav":
+                    pass
+                
+                cmd.append(str(dst))
+                
+                process = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='ignore',
+                    creationflags=self.get_creation_flags()
+                )
+                
+                if process.returncode == 0:
+                    self.log_message(f"✓ 完成: {dst.name}")
+                    return True
+                else:
+                    error_msg = process.stderr[:500] if process.stderr else "未知错误"
+                    self.log_message(f"✗ 失败: {src.name} - {error_msg}")
+                    return False
                 
         except Exception as e:
             self.log_message(f"✗ 异常: {src.name} - {str(e)}")
