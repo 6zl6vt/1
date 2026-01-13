@@ -13,9 +13,6 @@ class AudioConverterGUI:
         self.root.title("音频转码器 - 转换为 OGG Opus")
         self.root.geometry("800x600")
         
-        # 设置 ffmpeg 路径
-        self.setup_ffmpeg_path()
-        
         # 创建界面
         self.create_widgets()
         
@@ -23,22 +20,38 @@ class AudioConverterGUI:
         self.conversion_thread = None
         self.stop_conversion = False
         
-    def setup_ffmpeg_path(self):
-        """设置 ffmpeg 路径，优先使用打包后的资源路径"""
+        # 检查 ffmpeg
+        self.check_ffmpeg()
+        
+    def check_ffmpeg(self):
+        """检查 ffmpeg 是否可用"""
         try:
-            # PyInstaller 创建临时文件夹时使用 _MEIPASS
-            base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-            ffmpeg_path = os.path.join(base_path, 'ffmpeg.exe')
-            if os.path.exists(ffmpeg_path):
-                self.ffmpeg_path = ffmpeg_path
-                self.ffprobe_path = os.path.join(base_path, 'ffprobe.exe')
+            # 首先尝试从可执行文件同目录查找
+            if hasattr(sys, '_MEIPASS'):
+                # PyInstaller 打包后
+                base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+                ffmpeg_path = os.path.join(base_path, 'ffmpeg.exe')
+                if os.path.exists(ffmpeg_path):
+                    self.ffmpeg_path = ffmpeg_path
+                    self.status_var.set("FFmpeg 已加载")
+                    return True
             else:
-                # 如果打包目录中没有，尝试系统路径
-                self.ffmpeg_path = 'ffmpeg'
-                self.ffprobe_path = 'ffprobe'
-        except:
+                # 开发模式
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                ffmpeg_path = os.path.join(current_dir, 'ffmpeg.exe')
+                if os.path.exists(ffmpeg_path):
+                    self.ffmpeg_path = ffmpeg_path
+                    self.status_var.set("FFmpeg 已加载")
+                    return True
+                
+            # 尝试系统路径
             self.ffmpeg_path = 'ffmpeg'
-            self.ffprobe_path = 'ffprobe'
+            subprocess.run([self.ffmpeg_path, '-version'], capture_output=True, check=True)
+            self.status_var.set("使用系统 FFmpeg")
+            return True
+        except:
+            self.status_var.set("警告: FFmpeg 未找到")
+            return False
     
     def create_widgets(self):
         # 创建主框架
@@ -338,7 +351,7 @@ class AudioConverterGUI:
         try:
             subprocess.run([self.ffmpeg_path, "-version"], capture_output=True, check=True)
         except:
-            messagebox.showerror("错误", f"找不到 ffmpeg。请确保 ffmpeg.exe 在程序目录中。\n当前路径: {self.ffmpeg_path}")
+            messagebox.showerror("错误", "找不到 ffmpeg。请确保 ffmpeg.exe 在程序目录中。")
             return
             
         # 清空日志
