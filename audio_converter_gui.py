@@ -9,8 +9,8 @@ import os
 class AudioConverterGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("音频转码器 - 转换为 OGG Opus")
-        self.root.geometry("800x600")
+        self.root.title("音频转码器 - 多格式转换")
+        self.root.geometry("800x650")
         self.create_widgets()
         self.conversion_thread = None
         self.stop_conversion = False
@@ -72,20 +72,47 @@ class AudioConverterGUI:
         settings_frame = ttk.LabelFrame(main_frame, text="编码设置", padding="10")
         settings_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 10))
         
-        ttk.Label(settings_frame, text="比特率:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.bitrate_var = tk.StringVar(value="128k")
-        bitrate_combo = ttk.Combobox(settings_frame, textvariable=self.bitrate_var, 
-                                     values=["64k", "96k", "128k", "160k", "192k", "256k", "320k"], 
-                                     width=10, state="readonly")
-        bitrate_combo.grid(row=0, column=1, sticky=tk.W, pady=(0, 5))
+        ttk.Label(settings_frame, text="输出格式:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        self.format_var = tk.StringVar(value="ogg")
+        format_combo = ttk.Combobox(settings_frame, textvariable=self.format_var, 
+                                   values=["ogg", "mp3", "flac", "aac", "wav"], 
+                                   width=10, state="readonly")
+        format_combo.grid(row=0, column=1, sticky=tk.W, pady=(0, 5))
+        format_combo.bind("<<ComboboxSelected>>", self.on_format_changed)
         
-        ttk.Label(settings_frame, text="编码复杂度 (0-10):").grid(row=1, column=0, sticky=tk.W, pady=(0, 5))
+        ttk.Label(settings_frame, text="编码器:").grid(row=1, column=0, sticky=tk.W, pady=(0, 5))
+        self.codec_var = tk.StringVar(value="libopus")
+        self.codec_combo = ttk.Combobox(settings_frame, textvariable=self.codec_var, 
+                                       width=15, state="readonly")
+        self.codec_combo.grid(row=1, column=1, sticky=tk.W, pady=(0, 5))
+        
+        self.bitrate_label = ttk.Label(settings_frame, text="比特率:")
+        self.bitrate_label.grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
+        self.bitrate_var = tk.StringVar(value="128k")
+        self.bitrate_combo = ttk.Combobox(settings_frame, textvariable=self.bitrate_var, 
+                                         values=["64k", "96k", "128k", "160k", "192k", "256k", "320k"], 
+                                         width=10, state="readonly")
+        self.bitrate_combo.grid(row=2, column=1, sticky=tk.W, pady=(0, 5))
+        
+        self.complexity_label = ttk.Label(settings_frame, text="编码复杂度 (0-10):")
+        self.complexity_label.grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
         self.complexity_var = tk.IntVar(value=10)
-        complexity_scale = ttk.Scale(settings_frame, from_=0, to=10, variable=self.complexity_var, 
-                                     orient=tk.HORIZONTAL, length=150)
-        complexity_scale.grid(row=1, column=1, sticky=tk.W, pady=(0, 5))
-        complexity_label = ttk.Label(settings_frame, textvariable=self.complexity_var)
-        complexity_label.grid(row=1, column=2, sticky=tk.W, padx=(5, 0), pady=(0, 5))
+        self.complexity_scale = ttk.Scale(settings_frame, from_=0, to=10, variable=self.complexity_var, 
+                                         orient=tk.HORIZONTAL, length=150)
+        self.complexity_scale.grid(row=3, column=1, sticky=tk.W, pady=(0, 5))
+        self.complexity_label_val = ttk.Label(settings_frame, textvariable=self.complexity_var)
+        self.complexity_label_val.grid(row=3, column=2, sticky=tk.W, padx=(5, 0), pady=(0, 5))
+        
+        self.quality_label = ttk.Label(settings_frame, text="质量 (0-9, 0最好):")
+        self.quality_label.grid_forget()
+        self.quality_var = tk.IntVar(value=2)
+        self.quality_scale = ttk.Scale(settings_frame, from_=0, to=9, variable=self.quality_var, 
+                                      orient=tk.HORIZONTAL, length=150)
+        self.quality_scale.grid_forget()
+        self.quality_label_val = ttk.Label(settings_frame, textvariable=self.quality_var)
+        self.quality_label_val.grid_forget()
+        
+        self.update_format_settings()
         
         options_frame = ttk.LabelFrame(main_frame, text="文件处理选项", padding="10")
         options_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -93,11 +120,14 @@ class AudioConverterGUI:
         self.overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="覆盖已存在的文件", variable=self.overwrite_var).grid(row=0, column=0, sticky=tk.W)
         
-        self.skip_opus_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="跳过已编码的 Opus 文件", variable=self.skip_opus_var).grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        self.skip_same_format_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="跳过相同格式的文件", variable=self.skip_same_format_var).grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
         
         self.recursive_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="递归处理子目录", variable=self.recursive_var).grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
+        
+        self.preserve_metadata_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="保留歌曲属性", variable=self.preserve_metadata_var).grid(row=1, column=1, sticky=tk.W, padx=(20, 0), pady=(5, 0))
         
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=6, column=0, columnspan=2, pady=(10, 10))
@@ -132,6 +162,84 @@ class AudioConverterGUI:
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(10, weight=1)
+    
+    def on_format_changed(self, event):
+        self.update_format_settings()
+    
+    def update_format_settings(self):
+        format_selected = self.format_var.get()
+        
+        if format_selected == "ogg":
+            self.codec_combo["values"] = ["libopus", "libvorbis"]
+            self.codec_var.set("libopus")
+            self.bitrate_label.grid()
+            self.bitrate_combo.grid()
+            self.complexity_label.grid()
+            self.complexity_scale.grid()
+            self.complexity_label_val.grid()
+            self.quality_label.grid_forget()
+            self.quality_scale.grid_forget()
+            self.quality_label_val.grid_forget()
+        elif format_selected == "mp3":
+            self.codec_combo["values"] = ["libmp3lame"]
+            self.codec_var.set("libmp3lame")
+            self.bitrate_label.grid()
+            self.bitrate_combo["values"] = ["64k", "96k", "128k", "160k", "192k", "256k", "320k"]
+            self.bitrate_combo.grid()
+            self.complexity_label.grid_forget()
+            self.complexity_scale.grid_forget()
+            self.complexity_label_val.grid_forget()
+            self.quality_label.grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
+            self.quality_scale.grid(row=3, column=1, sticky=tk.W, pady=(0, 5))
+            self.quality_label_val.grid(row=3, column=2, sticky=tk.W, padx=(5, 0), pady=(0, 5))
+        elif format_selected == "flac":
+            self.codec_combo["values"] = ["flac"]
+            self.codec_var.set("flac")
+            self.bitrate_label.grid_forget()
+            self.bitrate_combo.grid_forget()
+            self.complexity_label.grid_forget()
+            self.complexity_scale.grid_forget()
+            self.complexity_label_val.grid_forget()
+            self.quality_label.grid_forget()
+            self.quality_scale.grid_forget()
+            self.quality_label_val.grid_forget()
+        elif format_selected == "aac":
+            self.codec_combo["values"] = ["aac", "libfdk_aac"]
+            self.codec_var.set("aac")
+            self.bitrate_label.grid()
+            self.bitrate_combo["values"] = ["64k", "96k", "128k", "160k", "192k", "256k", "320k"]
+            self.bitrate_combo.grid()
+            self.complexity_label.grid_forget()
+            self.complexity_scale.grid_forget()
+            self.complexity_label_val.grid_forget()
+            self.quality_label.grid_forget()
+            self.quality_scale.grid_forget()
+            self.quality_label_val.grid_forget()
+        elif format_selected == "wav":
+            self.codec_combo["values"] = ["pcm_s16le", "pcm_s24le", "pcm_s32le"]
+            self.codec_var.set("pcm_s16le")
+            self.bitrate_label.grid_forget()
+            self.bitrate_combo.grid_forget()
+            self.complexity_label.grid_forget()
+            self.complexity_scale.grid_forget()
+            self.complexity_label_val.grid_forget()
+            self.quality_label.grid_forget()
+            self.quality_scale.grid_forget()
+            self.quality_label_val.grid_forget()
+    
+    def get_output_extension(self):
+        format_selected = self.format_var.get()
+        if format_selected == "ogg":
+            return ".ogg"
+        elif format_selected == "mp3":
+            return ".mp3"
+        elif format_selected == "flac":
+            return ".flac"
+        elif format_selected == "aac":
+            return ".m4a"
+        elif format_selected == "wav":
+            return ".wav"
+        return ".ogg"
         
     def browse_file(self):
         filetypes = [
@@ -173,11 +281,10 @@ class AudioConverterGUI:
                     ".amr", ".m4b", ".oga", ".mkv", ".avi", ".mp4", ".mov", ".flv", ".webm"}
         return p.suffix.lower() in audio_ext
         
-    def is_opus_file(self, p):
-        opus_ext = {".opus", ".ogg", ".oga"}
-        return p.suffix.lower() in opus_ext
+    def is_same_format(self, p, target_ext):
+        return p.suffix.lower() == target_ext.lower()
         
-    def convert_file(self, src, dst, bitrate, complexity, overwrite):
+    def convert_file(self, src, dst, format_type, codec, bitrate, complexity, quality, overwrite):
         if dst.exists() and not overwrite:
             self.log_message(f"跳过 (已存在): {dst.name}")
             return True
@@ -187,15 +294,32 @@ class AudioConverterGUI:
                 self.ffmpeg_path,
                 "-y" if overwrite else "-n",
                 "-i", str(src),
-                "-map_metadata", "0",
-                "-map_chapters", "0",
-                "-codec:a", "libopus",
-                "-b:a", bitrate,
-                "-compression_level", str(complexity),
-                "-vbr", "on",
-                "-application", "audio",
-                str(dst)
             ]
+            
+            if self.preserve_metadata_var.get():
+                cmd += ["-map_metadata", "0", "-map_chapters", "0"]
+            
+            cmd += ["-codec:a", codec]
+            
+            if format_type == "ogg":
+                if codec == "libopus":
+                    cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on", "-application", "audio"]
+                elif codec == "libvorbis":
+                    cmd += ["-q:a", str(quality)]
+            elif format_type == "mp3":
+                if bitrate:
+                    cmd += ["-b:a", bitrate]
+                else:
+                    cmd += ["-q:a", str(quality)]
+            elif format_type == "flac":
+                cmd += ["-compression_level", str(complexity)]
+            elif format_type == "aac":
+                if bitrate:
+                    cmd += ["-b:a", bitrate]
+            elif format_type == "wav":
+                pass
+            
+            cmd.append(str(dst))
             
             self.log_message(f"转换中: {src.name}")
             
@@ -234,8 +358,9 @@ class AudioConverterGUI:
             audio_files = []
             if input_path.is_file():
                 if self.is_audio_file(input_path):
-                    if self.skip_opus_var.get() and self.is_opus_file(input_path):
-                        self.update_status("文件已经是 Opus 格式，已跳过")
+                    target_ext = self.get_output_extension()
+                    if self.skip_same_format_var.get() and self.is_same_format(input_path, target_ext):
+                        self.update_status("文件已经是目标格式，已跳过")
                         return
                     audio_files = [input_path]
                 else:
@@ -247,8 +372,9 @@ class AudioConverterGUI:
                 else:
                     audio_files = [p for p in input_path.iterdir() if p.is_file() and self.is_audio_file(p)]
                 
-                if self.skip_opus_var.get():
-                    audio_files = [p for p in audio_files if not self.is_opus_file(p)]
+                if self.skip_same_format_var.get():
+                    target_ext = self.get_output_extension()
+                    audio_files = [p for p in audio_files if not self.is_same_format(p, target_ext)]
                     
             if not audio_files:
                 self.update_status("未找到支持的音频文件")
@@ -267,12 +393,12 @@ class AudioConverterGUI:
                     
                 if input_path.is_file():
                     if output_path.is_dir():
-                        dst = output_path / (src.stem + ".ogg")
+                        dst = output_path / (src.stem + self.get_output_extension())
                     else:
-                        dst = output_path.with_suffix(".ogg")
+                        dst = output_path.with_suffix(self.get_output_extension())
                 else:
                     rel_path = src.relative_to(input_path)
-                    dst = (output_path / rel_path).with_suffix(".ogg")
+                    dst = (output_path / rel_path).with_suffix(self.get_output_extension())
                     
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 
@@ -281,10 +407,17 @@ class AudioConverterGUI:
                     skip_count += 1
                     continue
                     
+                bitrate = self.bitrate_var.get() if hasattr(self, 'bitrate_combo') and self.bitrate_combo.winfo_ismapped() else None
+                complexity = self.complexity_var.get() if hasattr(self, 'complexity_scale') and self.complexity_scale.winfo_ismapped() else None
+                quality = self.quality_var.get() if hasattr(self, 'quality_scale') and self.quality_scale.winfo_ismapped() else None
+                
                 success = self.convert_file(
                     src, dst,
-                    self.bitrate_var.get(),
-                    self.complexity_var.get(),
+                    self.format_var.get(),
+                    self.codec_var.get(),
+                    bitrate,
+                    complexity,
+                    quality,
                     self.overwrite_var.get()
                 )
                 
