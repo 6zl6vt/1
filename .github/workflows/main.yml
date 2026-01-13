@@ -3,32 +3,86 @@ name: 构建 Windows 可执行文件
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      release_name:
+        description: '发布名称'
+        required: true
+        default: '手动构建'
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - name: 检出代码
+      uses: actions/checkout@v4
     
     - name: 设置 Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+        cache: 'pip'
     
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller
+        
+    - name: 创建图标文件 (如果不存在)
+      run: |
+        if not exist "icon.ico" (
+          echo 创建默认图标文件...
+          # 创建一个简单的PNG图标
+          python -c "
+          from PIL import Image, ImageDraw
+          img = Image.new('RGBA', (256, 256), (70, 130, 180))
+          draw = ImageDraw.Draw(img)
+          draw.ellipse([50, 50, 206, 206], fill=(255, 255, 255))
+          draw.text((128, 128), 'A→O', fill=(70, 130, 180), anchor='mm', font_size=80)
+          img.save('icon.png')
+          "
+          # 转换为ICO格式
+          python -c "
+          from PIL import Image
+          img = Image.open('icon.png')
+          img.save('icon.ico', format='ICO', sizes=[(32, 32), (64, 64), (128, 128), (256, 256)])
+          "
+        )
     
     - name: 构建可执行文件
       run: |
-        pyinstaller --onefile --windowed --name="音频转OGG转换器" --icon=icon.ico audio2opus_gui.py
+        pyinstaller --onefile --windowed --name="AudioToOpusConverter" --icon=icon.ico audio2opus_gui.py
+        dir dist\
+    
+    - name: 创建便携版 (可选)
+      run: |
+        mkdir portable
+        copy dist\AudioToOpusConverter.exe portable\
+        copy README.md portable\
+        echo. > portable\ffmpeg-required.txt
+        echo 注意: 此程序需要 ffmpeg 才能正常工作！ >> portable\ffmpeg-required.txt
+        echo 请从 https://ffmpeg.org/download.html 下载 ffmpeg >> portable\ffmpeg-required.txt
+        echo 并将其添加到系统 PATH 环境变量中。 >> portable\ffmpeg-required.txt
     
     - name: 上传构建产物
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: 音频转OGG转换器
-        path: dist/音频转OGG转换器.exe
+        name: AudioToOpusConverter
+        path: |
+          dist/AudioToOpusConverter.exe
+          portable/
+        retention-days: 30
+    
+    - name: 创建 GitHub 发布版
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/AudioToOpusConverter.exe
+        generate_release_notes: true
+        prerelease: false
