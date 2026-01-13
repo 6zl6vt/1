@@ -29,7 +29,6 @@ def build_exe():
         "--add-data=ffprobe.exe;.",
         "--clean",
         "--noconfirm",
-        "--uac-admin",
     ]
     
     try:
