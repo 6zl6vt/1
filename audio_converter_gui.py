@@ -297,7 +297,7 @@ class AudioConverterGUI:
             ]
             
             if self.preserve_metadata_var.get():
-                cmd += ["-map_metadata", "0", "-map_chapters", "0", "-id3v2_version", "3"]
+                cmd += ["-map_metadata", "0", "-map_chapters", "0", "-write_id3v1", "1", "-id3v2_version", "3"]
             
             cmd += ["-codec:a", codec]
             
@@ -311,12 +311,15 @@ class AudioConverterGUI:
                     cmd += ["-b:a", bitrate]
                 else:
                     cmd += ["-q:a", str(quality)]
-                cmd += ["-id3v2_version", "3"]
+                if self.preserve_metadata_var.get():
+                    cmd += ["-write_xing", "0"]
             elif format_type == "flac":
                 cmd += ["-compression_level", str(complexity)]
             elif format_type == "aac":
                 if bitrate:
                     cmd += ["-b:a", bitrate]
+                if self.preserve_metadata_var.get():
+                    cmd += ["-movflags", "+faststart"]
             elif format_type == "wav":
                 pass
             
@@ -343,7 +346,7 @@ class AudioConverterGUI:
                     
                 return True
             else:
-                error_msg = process.stderr[:200] if process.stderr else "未知错误"
+                error_msg = process.stderr[:500] if process.stderr else "未知错误"
                 self.log_message(f"✗ 失败: {src.name} - {error_msg}")
                 return False
                 
