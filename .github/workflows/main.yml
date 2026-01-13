@@ -39,7 +39,7 @@ jobs:
         if ($ffmpegPath) {
             Copy-Item -Path $ffmpegPath.FullName -Destination .
         } else {
-            Write-Error "未找到 ffmpeg.exe"
+            Write-Error "ffmpeg.exe not found"
             exit 1
         }
         
@@ -55,24 +55,16 @@ jobs:
       run: |
         python build.py
         
-    - name: Rename executable
-      run: |
-        if (Test-Path dist/音频转码器.exe) {
-          echo "使用中文文件名: 音频转码器.exe"
-        } else {
-          Rename-Item dist/AudioConverter.exe dist/音频转码器.exe -ErrorAction SilentlyContinue
-        }
-        
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: 音频转码器
-        path: dist/音频转码器.exe
+        name: AudioConverter
+        path: dist/AudioConverter.exe
         retention-days: 30
         
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/音频转码器.exe
+        files: dist/AudioConverter.exe
         generate_release_notes: true
