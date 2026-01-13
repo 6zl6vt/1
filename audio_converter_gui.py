@@ -5,14 +5,16 @@ import sys
 import threading
 from pathlib import Path
 import os
-import json
-import tempfile
-import mutagen
-from mutagen.id3 import ID3, TIT2, TALB, TPE1, TRCK, TDRC, TCON, TCOM, TPE2, TPOS, APIC
-from mutagen.mp4 import MP4Tags, MP4Cover
-from mutagen.flac import FLAC, Picture
-import base64
 import io
+import mutagen
+from mutagen.easyid3 import EasyID3
+from mutagen.mp3 import MP3
+from mutagen.flac import FLAC
+from mutagen.oggvorbis import OggVorbis
+from mutagen.oggopus import OggOpus
+from mutagen.mp4 import MP4
+from mutagen.wave import WAVE
+import base64
 
 class AudioConverterGUI:
     def __init__(self, root):
@@ -55,7 +57,6 @@ class AudioConverterGUI:
         return 0
     
     def create_widgets(self):
-        # ... [保持原有的create_widgets代码不变] ...
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
@@ -249,6 +250,148 @@ class AudioConverterGUI:
         elif format_selected == "wav":
             return ".wav"
         return ".ogg"
+    
+    def get_mutagen_file(self, file_path):
+        ext = Path(file_path).suffix.lower()
+        
+        try:
+            if ext == '.mp3':
+                return MP3(file_path)
+            elif ext == '.flac':
+                return FLAC(file_path)
+            elif ext == '.ogg':
+                try:
+                    return OggOpus(file_path)
+                except:
+                    return OggVorbis(file_path)
+            elif ext in ['.m4a', '.mp4', '.aac']:
+                return MP4(file_path)
+            elif ext == '.wav':
+                return WAVE(file_path)
+            else:
+                return mutagen.File(file_path, easy=True)
+        except Exception as e:
+            self.log_message(f"无法读取文件元数据: {str(e)}")
+            return None
+    
+    def extract_metadata(self, src):
+        try:
+            audio = self.get_mutagen_file(str(src))
+            if audio is None:
+                return None
+            
+            metadata = {}
+            
+            if hasattr(audio, 'tags'):
+                if isinstance(audio.tags, dict):
+                    for key, value in audio.tags.items():
+                        if isinstance(value, list):
+                            metadata[key] = value[0] if value else ""
+                        else:
+                            metadata[key] = str(value)
+                elif hasattr(audio.tags, 'keys'):
+                    for key in audio.tags.keys():
+                        value = audio.tags.get(key)
+                        if isinstance(value, list):
+                            metadata[key] = value[0] if value else ""
+                        else:
+                            metadata[key] = str(value)
+            
+            easy_audio = mutagen.File(str(src), easy=True)
+            if easy_audio and hasattr(easy_audio, 'tags'):
+                for key, value in easy_audio.tags.items():
+                    metadata[key] = value[0] if isinstance(value, list) else str(value)
+            
+            self.log_message(f"✓ 提取到 {len(metadata)} 条元数据")
+            if metadata:
+                for key, value in list(metadata.items())[:5]:
+                    self.log_message(f"  {key}: {value[:50]}...")
+            
+            return metadata
+        except Exception as e:
+            self.log_message(f"提取元数据失败: {str(e)}")
+            return None
+    
+    def write_metadata(self, dst, metadata):
+        if not metadata:
+            return False
+        
+        try:
+            output_file = str(dst)
+            ext = Path(output_file).suffix.lower()
+            
+            temp_file = output_file + '.temp'
+            
+            with open(output_file, 'rb') as f:
+                audio_data = f.read()
+            
+            buffer = io.BytesIO(audio_data)
+            
+            try:
+                if ext == '.mp3':
+                    audio = MP3(buffer)
+                    easy_audio = EasyID3(buffer)
+                    for key, value in metadata.items():
+                        if key in easy_audio.valid_keys:
+                            easy_audio[key] = value
+                    easy_audio.save(buffer)
+                elif ext == '.flac':
+                    audio = FLAC(buffer)
+                    for key, value in metadata.items():
+                        audio[key] = value
+                    audio.save(buffer)
+                elif ext == '.ogg':
+                    try:
+                        audio = OggOpus(buffer)
+                    except:
+                        audio = OggVorbis(buffer)
+                    for key, value in metadata.items():
+                        audio[key] = value
+                    audio.save(buffer)
+                elif ext in ['.m4a', '.mp4']:
+                    audio = MP4(buffer)
+                    tag_mapping = {
+                        'title': '\xa9nam',
+                        'artist': '\xa9ART',
+                        'album': '\xa9alb',
+                        'tracknumber': 'trkn',
+                        'genre': '\xa9gen',
+                        'year': '\xa9day',
+                        'comment': '\xa9cmt',
+                        'composer': '\xa9wrt'
+                    }
+                    for key, value in metadata.items():
+                        mp4_key = tag_mapping.get(key, key)
+                        audio[mp4_key] = value
+                    audio.save(buffer)
+                elif ext == '.wav':
+                    audio = WAVE(buffer)
+                    for key, value in metadata.items():
+                        audio[key] = value
+                    audio.save(buffer)
+                else:
+                    audio = mutagen.File(buffer, easy=True)
+                    if audio:
+                        for key, value in metadata.items():
+                            audio[key] = value
+                        audio.save(buffer)
+            except Exception as e:
+                self.log_message(f"写入元数据失败: {str(e)}")
+                return False
+            
+            with open(temp_file, 'wb') as f:
+                buffer.seek(0)
+                f.write(buffer.read())
+            
+            os.remove(output_file)
+            os.rename(temp_file, output_file)
+            
+            self.log_message("✓ 歌曲属性已写入")
+            return True
+            
+        except Exception as e:
+            self.log_message(f"写入元数据失败: {str(e)}")
+            return False
         
     def browse_file(self):
         filetypes = [
@@ -292,382 +435,6 @@ class AudioConverterGUI:
         
     def is_same_format(self, p, target_ext):
         return p.suffix.lower() == target_ext.lower()
-    
-    def extract_metadata(self, src):
-        """使用mutagen提取音频文件的元数据"""
-        try:
-            self.log_message(f"正在提取元数据: {src.name}")
-            
-            # 尝试用mutagen打开文件
-            audio = mutagen.File(str(src), easy=True)
-            
-            if audio is None:
-                self.log_message(f"⚠ 无法用mutagen识别文件: {src.name}")
-                return None
-            
-            metadata = {}
-            
-            # 提取基本标签信息
-            metadata['title'] = audio.get('title', [src.stem])[0] if audio.get('title') else src.stem
-            metadata['album'] = audio.get('album', ['Unknown'])[0] if audio.get('album') else 'Unknown'
-            metadata['artist'] = audio.get('artist', ['Unknown'])[0] if audio.get('artist') else 'Unknown'
-            metadata['tracknumber'] = audio.get('tracknumber', ['0'])[0] if audio.get('tracknumber') else '0'
-            metadata['date'] = audio.get('date', [''])[0] if audio.get('date') else ''
-            metadata['genre'] = audio.get('genre', [''])[0] if audio.get('genre') else ''
-            
-            # 尝试获取专辑艺术家
-            if audio.get('albumartist'):
-                metadata['albumartist'] = audio.get('albumartist')[0]
-            
-            # 尝试获取光盘编号
-            if audio.get('discnumber'):
-                metadata['discnumber'] = audio.get('discnumber')[0]
-            
-            # 尝试获取作曲者
-            if audio.get('composer'):
-                metadata['composer'] = audio.get('composer')[0]
-            
-            # 尝试提取专辑封面
-            if hasattr(audio, 'tags'):
-                # 对于MP3文件
-                if src.suffix.lower() == '.mp3':
-                    try:
-                        id3 = ID3(str(src))
-                        for tag in id3.keys():
-                            if tag.startswith('APIC'):
-                                apic = id3[tag]
-                                metadata['cover'] = {
-                                    'data': base64.b64encode(apic.data).decode('utf-8'),
-                                    'mime': apic.mime,
-                                    'type': apic.type
-                                }
-                                break
-                    except:
-                        pass
-                # 对于FLAC文件
-                elif src.suffix.lower() == '.flac':
-                    try:
-                        flac = FLAC(str(src))
-                        if flac.pictures:
-                            pic = flac.pictures[0]
-                            metadata['cover'] = {
-                                'data': base64.b64encode(pic.data).decode('utf-8'),
-                                'mime': pic.mime,
-                                'type': pic.type
-                            }
-                    except:
-                        pass
-                # 对于M4A文件
-                elif src.suffix.lower() == '.m4a':
-                    try:
-                        mp4 = mutagen.File(str(src))
-                        if mp4 and 'covr' in mp4:
-                            cover = mp4['covr'][0]
-                            metadata['cover'] = {
-                                'data': base64.b64encode(cover).decode('utf-8'),
-                                'mime': 'image/jpeg'  # M4A通常使用JPEG
-                            }
-                    except:
-                        pass
-            
-            self.log_message(f"✓ 提取到元数据: 标题={metadata['title']}, 专辑={metadata['album']}, 艺术家={metadata['artist']}")
-            return metadata
-            
-        except Exception as e:
-            self.log_message(f"✗ 提取元数据失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def write_metadata(self, dst, metadata):
-        """使用mutagen写入音频文件的元数据"""
-        if not metadata:
-            return False
-            
-        try:
-            self.log_message(f"正在写入元数据: {dst.name}")
-            
-            # 根据文件类型使用不同的写入方式
-            ext = dst.suffix.lower()
-            
-            if ext == '.mp3':
-                # MP3文件使用ID3标签
-                try:
-                    # 尝试使用EasyID3
-                    audio = mutagen.File(str(dst), easy=True)
-                    if audio is None:
-                        audio = mutagen.File(str(dst))
-                    
-                    if audio is None:
-                        return False
-                    
-                    # 清除现有标签
-                    audio.delete()
-                    
-                    # 设置基本标签
-                    audio['title'] = metadata.get('title', dst.stem)
-                    audio['album'] = metadata.get('album', 'Unknown')
-                    audio['artist'] = metadata.get('artist', 'Unknown')
-                    
-                    if metadata.get('tracknumber'):
-                        audio['tracknumber'] = metadata.get('tracknumber')
-                    
-                    if metadata.get('date'):
-                        audio['date'] = metadata.get('date')
-                    
-                    if metadata.get('genre'):
-                        audio['genre'] = metadata.get('genre')
-                    
-                    if metadata.get('albumartist'):
-                        audio['albumartist'] = metadata.get('albumartist')
-                    
-                    if metadata.get('discnumber'):
-                        audio['discnumber'] = metadata.get('discnumber')
-                    
-                    if metadata.get('composer'):
-                        audio['composer'] = metadata.get('composer')
-                    
-                    # 保存标签
-                    audio.save()
-                    
-                    # 如果有专辑封面，使用ID3标签写入
-                    if metadata.get('cover'):
-                        try:
-                            id3 = ID3(str(dst))
-                            cover_data = base64.b64decode(metadata['cover']['data'])
-                            
-                            apic = APIC(
-                                encoding=3,  # UTF-8
-                                mime=metadata['cover'].get('mime', 'image/jpeg'),
-                                type=metadata['cover'].get('type', 3),  # 3表示封面图片
-                                desc='Cover',
-                                data=cover_data
-                            )
-                            id3.add(apic)
-                            id3.save()
-                        except Exception as e:
-                            self.log_message(f"⚠ 写入专辑封面失败: {str(e)}")
-                    
-                    self.log_message("✓ MP3标签写入成功")
-                    return True
-                    
-                except Exception as e:
-                    self.log_message(f"✗ MP3标签写入失败: {str(e)}")
-                    return False
-                    
-            elif ext == '.flac':
-                # FLAC文件使用FLAC标签
-                try:
-                    audio = FLAC(str(dst))
-                    
-                    # 清除现有标签
-                    audio.delete()
-                    
-                    # 设置基本标签
-                    audio['title'] = [metadata.get('title', dst.stem)]
-                    audio['album'] = [metadata.get('album', 'Unknown')]
-                    audio['artist'] = [metadata.get('artist', 'Unknown')]
-                    
-                    if metadata.get('tracknumber'):
-                        audio['tracknumber'] = [metadata.get('tracknumber')]
-                    
-                    if metadata.get('date'):
-                        audio['date'] = [metadata.get('date')]
-                    
-                    if metadata.get('genre'):
-                        audio['genre'] = [metadata.get('genre')]
-                    
-                    if metadata.get('albumartist'):
-                        audio['albumartist'] = [metadata.get('albumartist')]
-                    
-                    if metadata.get('discnumber'):
-                        audio['discnumber'] = [metadata.get('discnumber')]
-                    
-                    if metadata.get('composer'):
-                        audio['composer'] = [metadata.get('composer')]
-                    
-                    # 如果有专辑封面，写入图片
-                    if metadata.get('cover'):
-                        try:
-                            cover_data = base64.b64decode(metadata['cover']['data'])
-                            
-                            picture = Picture()
-                            picture.type = metadata['cover'].get('type', 3)
-                            picture.mime = metadata['cover'].get('mime', 'image/jpeg')
-                            picture.desc = 'Cover'
-                            picture.data = cover_data
-                            
-                            audio.clear_pictures()
-                            audio.add_picture(picture)
-                        except Exception as e:
-                            self.log_message(f"⚠ 写入专辑封面失败: {str(e)}")
-                    
-                    audio.save()
-                    self.log_message("✓ FLAC标签写入成功")
-                    return True
-                    
-                except Exception as e:
-                    self.log_message(f"✗ FLAC标签写入失败: {str(e)}")
-                    return False
-                    
-            elif ext == '.m4a':
-                # M4A文件使用MP4标签
-                try:
-                    audio = mutagen.File(str(dst))
-                    if audio is None:
-                        return False
-                    
-                    # 设置标签
-                    audio['\xa9nam'] = [metadata.get('title', dst.stem)]  # 标题
-                    audio['\xa9alb'] = [metadata.get('album', 'Unknown')]  # 专辑
-                    audio['\xa9ART'] = [metadata.get('artist', 'Unknown')]  # 艺术家
-                    
-                    if metadata.get('tracknumber'):
-                        audio['trkn'] = [(int(metadata.get('tracknumber').split('/')[0]), 0)]
-                    
-                    if metadata.get('date'):
-                        audio['\xa9day'] = [metadata.get('date')]
-                    
-                    if metadata.get('genre'):
-                        audio['\xa9gen'] = [metadata.get('genre')]
-                    
-                    if metadata.get('albumartist'):
-                        audio['aART'] = [metadata.get('albumartist')]
-                    
-                    if metadata.get('composer'):
-                        audio['\xa9wrt'] = [metadata.get('composer')]
-                    
-                    # 如果有专辑封面
-                    if metadata.get('cover'):
-                        try:
-                            cover_data = base64.b64decode(metadata['cover']['data'])
-                            audio['covr'] = [cover_data]
-                        except Exception as e:
-                            self.log_message(f"⚠ 写入专辑封面失败: {str(e)}")
-                    
-                    audio.save()
-                    self.log_message("✓ M4A标签写入成功")
-                    return True
-                    
-                except Exception as e:
-                    self.log_message(f"✗ M4A标签写入失败: {str(e)}")
-                    return False
-                    
-            elif ext == '.ogg':
-                # OGG文件使用Vorbis注释
-                try:
-                    audio = mutagen.File(str(dst), easy=True)
-                    if audio is None:
-                        return False
-                    
-                    # 清除现有标签
-                    audio.delete()
-                    
-                    # 设置基本标签
-                    audio['title'] = metadata.get('title', dst.stem)
-                    audio['album'] = metadata.get('album', 'Unknown')
-                    audio['artist'] = metadata.get('artist', 'Unknown')
-                    
-                    if metadata.get('tracknumber'):
-                        audio['tracknumber'] = metadata.get('tracknumber')
-                    
-                    if metadata.get('date'):
-                        audio['date'] = metadata.get('date')
-                    
-                    if metadata.get('genre'):
-                        audio['genre'] = metadata.get('genre')
-                    
-                    if metadata.get('albumartist'):
-                        audio['albumartist'] = metadata.get('albumartist')
-                    
-                    if metadata.get('discnumber'):
-                        audio['discnumber'] = metadata.get('discnumber')
-                    
-                    if metadata.get('composer'):
-                        audio['composer'] = metadata.get('composer')
-                    
-                    audio.save()
-                    self.log_message("✓ OGG标签写入成功")
-                    return True
-                    
-                except Exception as e:
-                    self.log_message(f"✗ OGG标签写入失败: {str(e)}")
-                    return False
-                    
-            else:
-                # 其他格式使用ffmpeg写入
-                self.log_message("⚠ 使用ffmpeg写入元数据")
-                return self.write_metadata_ffmpeg(dst, metadata)
-                
-        except Exception as e:
-            self.log_message(f"✗ 写入元数据异常: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def write_metadata_ffmpeg(self, dst, metadata):
-        """使用ffmpeg写入元数据（备选方案）"""
-        try:
-            # 创建临时元数据文件
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-                f.write(";FFMETADATA1\n")
-                
-                # 写入基本标签
-                if metadata.get('title'):
-                    f.write(f"title={metadata['title']}\n")
-                if metadata.get('album'):
-                    f.write(f"album={metadata['album']}\n")
-                if metadata.get('artist'):
-                    f.write(f"artist={metadata['artist']}\n")
-                if metadata.get('tracknumber'):
-                    f.write(f"track={metadata['tracknumber']}\n")
-                if metadata.get('date'):
-                    f.write(f"date={metadata['date']}\n")
-                if metadata.get('genre'):
-                    f.write(f"genre={metadata['genre']}\n")
-                
-                metadata_file = f.name
-            
-            # 使用ffmpeg写入元数据
-            temp_output = str(dst) + ".temp"
-            
-            cmd = [
-                self.ffmpeg_path,
-                "-y",
-                "-i", str(dst),
-                "-i", metadata_file,
-                "-map_metadata", "1",
-                "-c", "copy",
-                "-id3v2_version", "3",
-                temp_output
-            ]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore',
-                creationflags=self.get_creation_flags()
-            )
-            
-            os.remove(metadata_file)
-            
-            if result.returncode == 0:
-                # 替换原始文件
-                os.remove(str(dst))
-                os.rename(temp_output, str(dst))
-                self.log_message("✓ ffmpeg元数据写入成功")
-                return True
-            else:
-                if os.path.exists(temp_output):
-                    os.remove(temp_output)
-                self.log_message(f"✗ ffmpeg元数据写入失败: {result.stderr[:200]}")
-                return False
-                
-        except Exception as e:
-            self.log_message(f"✗ ffmpeg元数据写入异常: {str(e)}")
-            return False
         
     def convert_file(self, src, dst, format_type, codec, bitrate, complexity, quality, overwrite):
         if dst.exists() and not overwrite:
@@ -675,16 +442,10 @@ class AudioConverterGUI:
             return True
             
         try:
-            # 提取元数据
             metadata = None
             if self.preserve_metadata_var.get():
                 metadata = self.extract_metadata(src)
-                if metadata:
-                    self.log_message(f"✓ 提取到 {len(metadata)} 条元数据")
-                else:
-                    self.log_message("⚠ 未提取到元数据")
             
-            # 构建转换命令
             cmd = [
                 self.ffmpeg_path,
                 "-y" if overwrite else "-n",
@@ -692,7 +453,6 @@ class AudioConverterGUI:
                 "-codec:a", codec,
             ]
             
-            # 根据格式添加参数
             if format_type == "ogg":
                 if codec == "libopus":
                     cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on", "-application", "audio"]
@@ -711,31 +471,30 @@ class AudioConverterGUI:
             elif format_type == "wav":
                 pass
             
-            # 添加输出文件
             cmd.append(str(dst))
             
             self.log_message(f"转换中: {src.name}")
             
-            # 执行转换
+            creationflags = self.get_creation_flags()
+            
             process = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='ignore',
-                creationflags=self.get_creation_flags()
+                creationflags=creationflags
             )
             
             if process.returncode == 0:
                 self.log_message(f"✓ 音频转换完成: {dst.name}")
                 
-                # 写入元数据
                 if self.preserve_metadata_var.get() and metadata:
                     if self.write_metadata(dst, metadata):
-                        self.log_message("✓ 歌曲属性已写入")
+                        self.log_message("✓ 歌曲属性已保留")
                     else:
                         self.log_message("⚠ 歌曲属性写入失败")
-                    
+                
                 return True
             else:
                 error_msg = process.stderr[:500] if process.stderr else "未知错误"
