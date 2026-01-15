@@ -15,7 +15,8 @@ def build_exe():
             missing_files.append(file)
     
     if missing_files:
-        print(f"缺少文件: {', '.join(missing_files)}")
+        print(f"Missing files: {', '.join(missing_files)}")
+        print("Build will continue but program may not work properly")
     
     args = [
         "audio_converter_gui.py",
@@ -47,9 +48,13 @@ def build_exe():
         PyInstaller.__main__.run(args)
         exe_path = os.path.join("dist", "AudioConverter.exe")
         if os.path.exists(exe_path):
-            print(f"创建: {exe_path}")
+            print(f"Executable created: {exe_path}")
+            return True
+        else:
+            print("Error: Executable not found")
+            return False
     except Exception as e:
-        print(f"失败: {e}")
+        print(f"Build failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
