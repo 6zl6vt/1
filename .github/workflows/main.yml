@@ -1,78 +1,55 @@
-name: Build Audio Converter
+name: Build Windows Executable
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
-        cache: 'pip'
+        python-version: '3.9'
         
-    - name: Install Python dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install pyinstaller
+        pip install tkinter
         
     - name: Download FFmpeg
       run: |
-        # 下载 FFmpeg Windows 版本
-        $ffmpegUrl = "https://github.com/GyanD/codexffmpeg/releases/download/2025-01-28/ffmpeg-2025-01-28-git-4b4f16e905-full_build.7z"
-        $outputFile = "ffmpeg.7z"
-        Invoke-WebRequest -Uri $ffmpegUrl -OutFile $outputFile
+        Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile "ffmpeg.zip"
+        Expand-Archive -Path "ffmpeg.zip" -DestinationPath "."
+        Get-ChildItem -Recurse -Filter "ffmpeg.exe" | ForEach-Object { Copy-Item $_.FullName -Destination "." }
+        Remove-Item "ffmpeg.zip" -Force
+        Remove-Item "ffmpeg-master-latest-win64-gpl" -Recurse -Force
         
-        # 安装 7-Zip 来解压
-        choco install 7zip -y
-        
-        # 解压 FFmpeg
-        7z x ffmpeg.7z -offmpeg_temp
-        
-        # 复制 ffmpeg.exe 和 ffprobe.exe 到当前目录
-        Copy-Item -Path "ffmpeg_temp\ffmpeg-*-full_build\bin\ffmpeg.exe" -Destination "ffmpeg.exe"
-        Copy-Item -Path "ffmpeg_temp\ffmpeg-*-full_build\bin\ffprobe.exe" -Destination "ffprobe.exe"
-        
-        # 验证文件存在
-        if (Test-Path "ffmpeg.exe") {
-          Write-Host "FFmpeg downloaded successfully"
-          .\ffmpeg.exe -version
-        } else {
-          Write-Error "FFmpeg download failed"
-          exit 1
-        }
-        
-    - name: Build executable
+    - name: Build with PyInstaller
       run: |
-        # 运行构建脚本
-        python build.py
+        pyinstaller --onefile `
+          --name "AudioConverter" `
+          --add-data "ffmpeg.exe;." `
+          --windowed `
+          --icon=icon.ico `
+          audio_converter_gui.py
         
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
       with:
-        name: AudioConverter-Windows
-        path: |
-          dist/
-          ffmpeg.exe
-          ffprobe.exe
-        retention-days: 7
+        name: AudioConverter
+        path: dist/AudioConverter.exe
         
-    - name: Create release (on tag)
+    - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        # 获取标签名
-        $tag = "${env:GITHUB_REF##*/}"
-        # 重命名可执行文件包含版本号
-        Rename-Item "dist\AudioConverter.exe" "dist\AudioConverter-$tag.exe"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/AudioConverter.exe
