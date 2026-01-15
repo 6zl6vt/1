@@ -15,55 +15,40 @@ def build_exe():
     
     for file in required_files:
         if not os.path.exists(file):
-            print(f"错误: 找不到必需文件: {file}")
-            print("请确保 ffmpeg.exe 在当前目录中")
+            print(f"Error: Required file not found: {file}")
+            print("Please ensure ffmpeg.exe is in the current directory")
             sys.exit(1)
     
     for file in optional_files:
         if not os.path.exists(file):
-            print(f"警告: 找不到可选文件: {file}")
-            print("程序可以运行，但某些功能可能受限")
-    
-    args = [
-        "audio_converter_gui.py",
-        "--name=AudioConverter",
-        "--onefile",
-        "--windowed",
-        "--add-data=ffmpeg.exe;.",
-        "--clean",
-        "--noconfirm",
-        "--hidden-import=mutagen",
-        "--hidden-import=mutagen.id3",
-        "--hidden-import=mutagen.mp3",
-        "--hidden-import=mutagen.flac",
-        "--hidden-import=mutagen.oggvorbis",
-        "--hidden-import=mutagen.oggopus",
-        "--hidden-import=mutagen.mp4",
-        "--hidden-import=mutagen.wave",
-        "--icon=icon.ico",  # 可选：添加图标文件
-    ]
-    
+            print(f"Warning: Optional file not found: {file}")
+            print("Program can run, but some features may be limited")
+
     # 如果有 ffprobe.exe，添加它
     if os.path.exists("ffprobe.exe"):
         args.append("--add-data=ffprobe.exe;.")
     
+    # 如果有图标文件，添加图标参数
+    if os.path.exists("icon.ico"):
+        args.append("--icon=icon.ico")
+    
     try:
         PyInstaller.__main__.run(args)
-        print("构建完成! 可执行文件在 dist 目录中")
+        print("Build completed! Executable file in dist directory")
         
         exe_path = os.path.join("dist", "AudioConverter.exe")
         
         if os.path.exists(exe_path):
-            print(f"可执行文件已创建: {exe_path}")
-            print("文件大小:", os.path.getsize(exe_path), "字节")
+            print(f"Executable created: {exe_path}")
+            print("File size:", os.path.getsize(exe_path), "bytes")
             
             # 复制 ffmpeg 到 dist 目录（可选，因为已经嵌入）
             if os.path.exists("ffmpeg.exe"):
                 shutil.copy("ffmpeg.exe", "dist/ffmpeg.exe")
-                print("已复制 ffmpeg.exe 到 dist 目录")
+                print("Copied ffmpeg.exe to dist directory")
             
     except Exception as e:
-        print(f"构建失败: {e}")
+        print(f"Build failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
