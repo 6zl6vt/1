@@ -3,6 +3,14 @@ import os
 import shutil
 import sys
 
+# 设置正确的编码
+if sys.platform == 'win32':
+    import locale
+    # 尝试使用UTF-8编码
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+
 def build_exe():
     if os.path.exists("build"):
         shutil.rmtree("build")
@@ -45,6 +53,7 @@ def build_exe():
         args.append("--version-file=version_info.txt")
     
     try:
+        print("Building executable...")
         PyInstaller.__main__.run(args)
         exe_path = os.path.join("dist", "AudioConverter.exe")
         if os.path.exists(exe_path):
