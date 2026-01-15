@@ -5,25 +5,36 @@ import sys
 import threading
 from pathlib import Path
 import os
-import io
 import mutagen
-from mutagen.easyid3 import EasyID3
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggopus import OggOpus
 from mutagen.mp4 import MP4
 from mutagen.wave import WAVE
-import base64
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, TDRC, TCON, TCOM, TENC, APIC
+import tempfile
+import shutil
 
 class AudioConverterGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("音频转码器 - 多格式转换")
+        self.root.title("音频转码器")
         self.root.geometry("800x650")
-        self.create_widgets()
+        
+        self.FORMAT_CONFIGS = {
+            "ogg": {"ext": ".ogg", "codecs": ["libopus", "libvorbis"], "supports_bitrate": True, "supports_complexity": True},
+            "mp3": {"ext": ".mp3", "codecs": ["libmp3lame"], "supports_bitrate": True, "supports_complexity": False},
+            "flac": {"ext": ".flac", "codecs": ["flac"], "supports_bitrate": False, "supports_complexity": False},
+            "aac": {"ext": ".m4a", "codecs": ["aac", "libfdk_aac"], "supports_bitrate": True, "supports_complexity": False},
+            "wav": {"ext": ".wav", "codecs": ["pcm_s16le", "pcm_s24le", "pcm_s32le"], "supports_bitrate": False, "supports_complexity": False}
+        }
+        
+        self.SUPPORTED_FORMATS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".ape"}
         self.conversion_thread = None
         self.stop_conversion = False
+        self.create_widgets()
+        self.setup_shortcuts()
         self.check_ffmpeg()
     
     def check_ffmpeg(self):
@@ -70,7 +81,7 @@ class AudioConverterGUI:
         ttk.Button(input_frame, text="浏览文件", command=self.browse_file).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(input_frame, text="浏览目录", command=self.browse_directory).pack(side=tk.LEFT)
         
-        ttk.Label(main_frame, text="输出目录 (可选，默认为输入目录):").grid(row=2, column=0, sticky=tk.W, pady=(10, 5))
+        ttk.Label(main_frame, text="输出目录:").grid(row=2, column=0, sticky=tk.W, pady=(10, 5))
         
         output_frame = ttk.Frame(main_frame)
         output_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -85,7 +96,7 @@ class AudioConverterGUI:
         ttk.Label(settings_frame, text="输出格式:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         self.format_var = tk.StringVar(value="ogg")
         format_combo = ttk.Combobox(settings_frame, textvariable=self.format_var, 
-                                   values=["ogg", "mp3", "flac", "aac", "wav"], 
+                                   values=list(self.FORMAT_CONFIGS.keys()), 
                                    width=10, state="readonly")
         format_combo.grid(row=0, column=1, sticky=tk.W, pady=(0, 5))
         format_combo.bind("<<ComboboxSelected>>", self.on_format_changed)
@@ -173,17 +184,28 @@ class AudioConverterGUI:
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(10, weight=1)
     
+    def setup_shortcuts(self):
+        self.root.bind('<Control-o>', lambda e: self.browse_file())
+        self.root.bind('<Control-d>', lambda e: self.browse_directory())
+    
     def on_format_changed(self, event):
         self.update_format_settings()
     
     def update_format_settings(self):
         format_selected = self.format_var.get()
+        config = self.FORMAT_CONFIGS[format_selected]
         
-        if format_selected == "ogg":
-            self.codec_combo["values"] = ["libopus", "libvorbis"]
-            self.codec_var.set("libopus")
+        self.codec_combo["values"] = config["codecs"]
+        self.codec_var.set(config["codecs"][0])
+        
+        if config["supports_bitrate"]:
             self.bitrate_label.grid()
             self.bitrate_combo.grid()
+        else:
+            self.bitrate_label.grid_forget()
+            self.bitrate_combo.grid_forget()
+        
+        if format_selected == "ogg":
             self.complexity_label.grid()
             self.complexity_scale.grid()
             self.complexity_label_val.grid()
@@ -191,45 +213,13 @@ class AudioConverterGUI:
             self.quality_scale.grid_forget()
             self.quality_label_val.grid_forget()
         elif format_selected == "mp3":
-            self.codec_combo["values"] = ["libmp3lame"]
-            self.codec_var.set("libmp3lame")
-            self.bitrate_label.grid()
-            self.bitrate_combo["values"] = ["64k", "96k", "128k", "160k", "192k", "256k", "320k"]
-            self.bitrate_combo.grid()
             self.complexity_label.grid_forget()
             self.complexity_scale.grid_forget()
             self.complexity_label_val.grid_forget()
             self.quality_label.grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
             self.quality_scale.grid(row=3, column=1, sticky=tk.W, pady=(0, 5))
             self.quality_label_val.grid(row=3, column=2, sticky=tk.W, padx=(5, 0), pady=(0, 5))
-        elif format_selected == "flac":
-            self.codec_combo["values"] = ["flac"]
-            self.codec_var.set("flac")
-            self.bitrate_label.grid_forget()
-            self.bitrate_combo.grid_forget()
-            self.complexity_label.grid_forget()
-            self.complexity_scale.grid_forget()
-            self.complexity_label_val.grid_forget()
-            self.quality_label.grid_forget()
-            self.quality_scale.grid_forget()
-            self.quality_label_val.grid_forget()
-        elif format_selected == "aac":
-            self.codec_combo["values"] = ["aac", "libfdk_aac"]
-            self.codec_var.set("aac")
-            self.bitrate_label.grid()
-            self.bitrate_combo["values"] = ["64k", "96k", "128k", "160k", "192k", "256k", "320k"]
-            self.bitrate_combo.grid()
-            self.complexity_label.grid_forget()
-            self.complexity_scale.grid_forget()
-            self.complexity_label_val.grid_forget()
-            self.quality_label.grid_forget()
-            self.quality_scale.grid_forget()
-            self.quality_label_val.grid_forget()
-        elif format_selected == "wav":
-            self.codec_combo["values"] = ["pcm_s16le", "pcm_s24le", "pcm_s32le"]
-            self.codec_var.set("pcm_s16le")
-            self.bitrate_label.grid_forget()
-            self.bitrate_combo.grid_forget()
+        else:
             self.complexity_label.grid_forget()
             self.complexity_scale.grid_forget()
             self.complexity_label_val.grid_forget()
@@ -238,166 +228,10 @@ class AudioConverterGUI:
             self.quality_label_val.grid_forget()
     
     def get_output_extension(self):
-        format_selected = self.format_var.get()
-        if format_selected == "ogg":
-            return ".ogg"
-        elif format_selected == "mp3":
-            return ".mp3"
-        elif format_selected == "flac":
-            return ".flac"
-        elif format_selected == "aac":
-            return ".m4a"
-        elif format_selected == "wav":
-            return ".wav"
-        return ".ogg"
-    
-    def get_mutagen_file(self, file_path):
-        ext = Path(file_path).suffix.lower()
-        
-        try:
-            if ext == '.mp3':
-                return MP3(file_path)
-            elif ext == '.flac':
-                return FLAC(file_path)
-            elif ext == '.ogg':
-                try:
-                    return OggOpus(file_path)
-                except:
-                    return OggVorbis(file_path)
-            elif ext in ['.m4a', '.mp4', '.aac']:
-                return MP4(file_path)
-            elif ext == '.wav':
-                return WAVE(file_path)
-            else:
-                return mutagen.File(file_path, easy=True)
-        except Exception as e:
-            self.log_message(f"无法读取文件元数据: {str(e)}")
-            return None
-    
-    def extract_metadata(self, src):
-        try:
-            audio = self.get_mutagen_file(str(src))
-            if audio is None:
-                return None
-            
-            metadata = {}
-            
-            if hasattr(audio, 'tags'):
-                if isinstance(audio.tags, dict):
-                    for key, value in audio.tags.items():
-                        if isinstance(value, list):
-                            metadata[key] = value[0] if value else ""
-                        else:
-                            metadata[key] = str(value)
-                elif hasattr(audio.tags, 'keys'):
-                    for key in audio.tags.keys():
-                        value = audio.tags.get(key)
-                        if isinstance(value, list):
-                            metadata[key] = value[0] if value else ""
-                        else:
-                            metadata[key] = str(value)
-            
-            easy_audio = mutagen.File(str(src), easy=True)
-            if easy_audio and hasattr(easy_audio, 'tags'):
-                for key, value in easy_audio.tags.items():
-                    metadata[key] = value[0] if isinstance(value, list) else str(value)
-            
-            self.log_message(f"✓ 提取到 {len(metadata)} 条元数据")
-            if metadata:
-                for key, value in list(metadata.items())[:5]:
-                    self.log_message(f"  {key}: {value[:50]}...")
-            
-            return metadata
-        except Exception as e:
-            self.log_message(f"提取元数据失败: {str(e)}")
-            return None
-    
-    def write_metadata(self, dst, metadata):
-        if not metadata:
-            return False
-        
-        try:
-            output_file = str(dst)
-            ext = Path(output_file).suffix.lower()
-            
-            temp_file = output_file + '.temp'
-            
-            with open(output_file, 'rb') as f:
-                audio_data = f.read()
-            
-            buffer = io.BytesIO(audio_data)
-            
-            try:
-                if ext == '.mp3':
-                    audio = MP3(buffer)
-                    easy_audio = EasyID3(buffer)
-                    for key, value in metadata.items():
-                        if key in easy_audio.valid_keys:
-                            easy_audio[key] = value
-                    easy_audio.save(buffer)
-                elif ext == '.flac':
-                    audio = FLAC(buffer)
-                    for key, value in metadata.items():
-                        audio[key] = value
-                    audio.save(buffer)
-                elif ext == '.ogg':
-                    try:
-                        audio = OggOpus(buffer)
-                    except:
-                        audio = OggVorbis(buffer)
-                    for key, value in metadata.items():
-                        audio[key] = value
-                    audio.save(buffer)
-                elif ext in ['.m4a', '.mp4']:
-                    audio = MP4(buffer)
-                    tag_mapping = {
-                        'title': '\xa9nam',
-                        'artist': '\xa9ART',
-                        'album': '\xa9alb',
-                        'tracknumber': 'trkn',
-                        'genre': '\xa9gen',
-                        'year': '\xa9day',
-                        'comment': '\xa9cmt',
-                        'composer': '\xa9wrt'
-                    }
-                    for key, value in metadata.items():
-                        mp4_key = tag_mapping.get(key, key)
-                        audio[mp4_key] = value
-                    audio.save(buffer)
-                elif ext == '.wav':
-                    audio = WAVE(buffer)
-                    for key, value in metadata.items():
-                        audio[key] = value
-                    audio.save(buffer)
-                else:
-                    audio = mutagen.File(buffer, easy=True)
-                    if audio:
-                        for key, value in metadata.items():
-                            audio[key] = value
-                        audio.save(buffer)
-            except Exception as e:
-                self.log_message(f"写入元数据失败: {str(e)}")
-                return False
-            
-            with open(temp_file, 'wb') as f:
-                buffer.seek(0)
-                f.write(buffer.read())
-            
-            os.remove(output_file)
-            os.rename(temp_file, output_file)
-            
-            self.log_message("✓ 歌曲属性已写入")
-            return True
-            
-        except Exception as e:
-            self.log_message(f"写入元数据失败: {str(e)}")
-            return False
+        return self.FORMAT_CONFIGS[self.format_var.get()]["ext"]
         
     def browse_file(self):
-        filetypes = [
-            ("音频文件", "*.mp3 *.flac *.wav *.m4a *.aac *.ogg *.opus *.wma *.ape"),
-            ("所有文件", "*.*")
-        ]
+        filetypes = [("音频文件", "*.mp3 *.flac *.wav *.m4a *.aac *.ogg *.opus *.wma *.ape"), ("所有文件", "*.*")]
         filename = filedialog.askopenfilename(title="选择音频文件", filetypes=filetypes)
         if filename:
             self.input_path.set(filename)
@@ -428,34 +262,65 @@ class AudioConverterGUI:
         self.root.update_idletasks()
         
     def is_audio_file(self, p):
-        audio_ext = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".ape", 
-                    ".alac", ".aiff", ".aif", ".dsf", ".dff", ".tta", ".tak", ".dts", ".ac3", 
-                    ".amr", ".m4b", ".oga", ".mkv", ".avi", ".mp4", ".mov", ".flv", ".webm"}
-        return p.suffix.lower() in audio_ext
+        return p.suffix.lower() in self.SUPPORTED_FORMATS
         
     def is_same_format(self, p, target_ext):
         return p.suffix.lower() == target_ext.lower()
-        
+    
+    def extract_metadata(self, src_path):
+        try:
+            audio = mutagen.File(str(src_path), easy=True)
+            if audio and hasattr(audio, 'tags'):
+                metadata = {}
+                for key, value in audio.tags.items():
+                    if isinstance(value, list):
+                        metadata[key] = value[0]
+                    else:
+                        metadata[key] = str(value)
+                return metadata
+            return {}
+        except:
+            return {}
+    
+    def add_metadata(self, dst_path, metadata):
+        try:
+            if not metadata:
+                return False
+            
+            dst_path_str = str(dst_path)
+            temp_file = dst_path_str + '.temp'
+            shutil.copy2(dst_path_str, temp_file)
+            
+            audio = mutagen.File(temp_file, easy=False)
+            if audio is None:
+                return False
+            
+            for key, value in metadata.items():
+                if key != 'picture':
+                    audio[key] = str(value)
+            
+            audio.save()
+            shutil.move(temp_file, dst_path_str)
+            return True
+            
+        except:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            return False
+    
     def convert_file(self, src, dst, format_type, codec, bitrate, complexity, quality, overwrite):
         if dst.exists() and not overwrite:
-            self.log_message(f"跳过 (已存在): {dst.name}")
+            self.log_message(f"跳过: {dst.name}")
             return True
             
         try:
-            metadata = None
-            if self.preserve_metadata_var.get():
-                metadata = self.extract_metadata(src)
+            metadata = self.extract_metadata(src) if self.preserve_metadata_var.get() else None
             
-            cmd = [
-                self.ffmpeg_path,
-                "-y" if overwrite else "-n",
-                "-i", str(src),
-                "-codec:a", codec,
-            ]
+            cmd = [self.ffmpeg_path, "-y" if overwrite else "-n", "-i", str(src), "-codec:a", codec]
             
             if format_type == "ogg":
                 if codec == "libopus":
-                    cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on", "-application", "audio"]
+                    cmd += ["-b:a", bitrate, "-compression_level", str(complexity), "-vbr", "on"]
                 elif codec == "libvorbis":
                     cmd += ["-q:a", str(quality)]
             elif format_type == "mp3":
@@ -468,41 +333,43 @@ class AudioConverterGUI:
             elif format_type == "aac":
                 if bitrate:
                     cmd += ["-b:a", bitrate]
-            elif format_type == "wav":
-                pass
             
-            cmd.append(str(dst))
+            cmd += ["-map_metadata", "-1", "-vn"]
+            temp_output = str(dst) + ".temp"
+            cmd.append(temp_output)
             
-            self.log_message(f"转换中: {src.name}")
+            self.log_message(f"转换: {src.name}")
             
-            creationflags = self.get_creation_flags()
-            
-            process = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore',
-                creationflags=creationflags
-            )
+            process = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore', creationflags=self.get_creation_flags())
             
             if process.returncode == 0:
-                self.log_message(f"✓ 音频转换完成: {dst.name}")
-                
-                if self.preserve_metadata_var.get() and metadata:
-                    if self.write_metadata(dst, metadata):
-                        self.log_message("✓ 歌曲属性已保留")
-                    else:
-                        self.log_message("⚠ 歌曲属性写入失败")
-                
-                return True
+                if os.path.exists(temp_output):
+                    if dst.exists():
+                        os.remove(str(dst))
+                    os.rename(temp_output, str(dst))
+                    
+                    self.log_message(f"✓ 完成: {dst.name}")
+                    
+                    if self.preserve_metadata_var.get() and metadata:
+                        if self.add_metadata(dst, metadata):
+                            self.log_message("✓ 属性已添加")
+                    
+                    return True
+                else:
+                    self.log_message("✗ 文件不存在")
+                    return False
             else:
-                error_msg = process.stderr[:500] if process.stderr else "未知错误"
-                self.log_message(f"✗ 失败: {src.name} - {error_msg}")
+                self.log_message(f"✗ 失败: {src.name}")
+                
+                if os.path.exists(temp_output):
+                    os.remove(temp_output)
                 return False
                 
         except Exception as e:
-            self.log_message(f"✗ 异常: {src.name} - {str(e)}")
+            self.log_message(f"✗ 异常: {src.name}")
+            temp_output = str(dst) + ".temp"
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
             return False
             
     def conversion_worker(self):
@@ -519,11 +386,11 @@ class AudioConverterGUI:
                 if self.is_audio_file(input_path):
                     target_ext = self.get_output_extension()
                     if self.skip_same_format_var.get() and self.is_same_format(input_path, target_ext):
-                        self.update_status("文件已经是目标格式，已跳过")
+                        self.update_status("文件已经是目标格式")
                         return
                     audio_files = [input_path]
                 else:
-                    self.update_status("错误: 不支持的音频格式")
+                    self.update_status("错误: 不支持的格式")
                     return
             else:
                 if self.recursive_var.get():
@@ -536,11 +403,11 @@ class AudioConverterGUI:
                     audio_files = [p for p in audio_files if not self.is_same_format(p, target_ext)]
                     
             if not audio_files:
-                self.update_status("未找到支持的音频文件")
+                self.update_status("未找到音频文件")
                 return
                 
             total_files = len(audio_files)
-            self.update_status(f"找到 {total_files} 个文件需要转换")
+            self.update_status(f"找到 {total_files} 个文件")
             
             success_count = 0
             skip_count = 0
@@ -562,32 +429,24 @@ class AudioConverterGUI:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 
                 if dst.exists() and not self.overwrite_var.get():
-                    self.log_message(f"跳过 (已存在): {dst.name}")
+                    self.log_message(f"跳过: {dst.name}")
                     skip_count += 1
                     continue
                     
-                bitrate = self.bitrate_var.get() if hasattr(self, 'bitrate_combo') and self.bitrate_combo.winfo_ismapped() else None
-                complexity = self.complexity_var.get() if hasattr(self, 'complexity_scale') and self.complexity_scale.winfo_ismapped() else None
-                quality = self.quality_var.get() if hasattr(self, 'quality_scale') and self.quality_scale.winfo_ismapped() else None
+                bitrate = self.bitrate_var.get() if self.bitrate_combo.winfo_ismapped() else None
+                complexity = self.complexity_var.get() if self.complexity_scale.winfo_ismapped() else None
+                quality = self.quality_var.get() if self.quality_scale.winfo_ismapped() else None
                 
-                success = self.convert_file(
-                    src, dst,
-                    self.format_var.get(),
-                    self.codec_var.get(),
-                    bitrate,
-                    complexity,
-                    quality,
-                    self.overwrite_var.get()
-                )
+                success = self.convert_file(src, dst, self.format_var.get(), self.codec_var.get(), bitrate, complexity, quality, self.overwrite_var.get())
                 
                 if success:
                     success_count += 1
                     
                 progress = (i + 1) / total_files * 100
                 self.update_progress(progress)
-                self.update_status(f"处理中: {i+1}/{total_files}")
+                self.update_status(f"处理: {i+1}/{total_files}")
                 
-            self.update_status(f"转换完成! 成功: {success_count}, 跳过: {skip_count}, 失败: {total_files - success_count - skip_count}")
+            self.update_status(f"完成! 成功: {success_count}, 跳过: {skip_count}")
             self.update_progress(100)
             
         except Exception as e:
@@ -606,16 +465,13 @@ class AudioConverterGUI:
         try:
             subprocess.run([self.ffmpeg_path, "-version"], capture_output=True, check=True, creationflags=self.get_creation_flags())
         except:
-            messagebox.showerror("错误", "找不到 ffmpeg。请确保 ffmpeg.exe 在程序目录中。")
+            messagebox.showerror("错误", "找不到 ffmpeg")
             return
             
         self.log_text.delete(1.0, tk.END)
-        
         self.convert_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
-        
         self.update_progress(0)
-        
         self.conversion_thread = threading.Thread(target=self.conversion_worker, daemon=True)
         self.conversion_thread.start()
         
