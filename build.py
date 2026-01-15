@@ -9,16 +9,13 @@ def build_exe():
     if os.path.exists("dist"):
         shutil.rmtree("dist")
     
-    ffmpeg_files = ["ffmpeg.exe", "ffprobe.exe"]
     missing_files = []
-    
-    for file in ffmpeg_files:
+    for file in ["ffmpeg.exe", "ffprobe.exe"]:
         if not os.path.exists(file):
             missing_files.append(file)
     
     if missing_files:
-        print(f"Warning: Missing files: {', '.join(missing_files)}")
-        print("Build will continue but program may not work properly")
+        print(f"缺少文件: {', '.join(missing_files)}")
     
     args = [
         "audio_converter_gui.py",
@@ -29,6 +26,7 @@ def build_exe():
         "--add-data=ffprobe.exe;.",
         "--clean",
         "--noconfirm",
+        "--optimize=2",
         "--hidden-import=mutagen",
         "--hidden-import=mutagen.id3",
         "--hidden-import=mutagen.mp3",
@@ -39,17 +37,19 @@ def build_exe():
         "--hidden-import=mutagen.wave",
     ]
     
+    if os.path.exists("icon.ico"):
+        args.append("--icon=icon.ico")
+    
+    if os.path.exists("version_info.txt"):
+        args.append("--version-file=version_info.txt")
+    
     try:
         PyInstaller.__main__.run(args)
-        print("Build completed! Executable file in dist directory")
-        
         exe_path = os.path.join("dist", "AudioConverter.exe")
-        
         if os.path.exists(exe_path):
-            print(f"Executable created: {exe_path}")
-            
+            print(f"创建: {exe_path}")
     except Exception as e:
-        print(f"Build failed: {e}")
+        print(f"失败: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
