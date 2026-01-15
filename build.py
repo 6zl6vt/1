@@ -9,28 +9,36 @@ def build_exe():
     if os.path.exists("dist"):
         shutil.rmtree("dist")
     
-    # 检查必要的文件
-    required_files = ["ffmpeg.exe"]
-    optional_files = ["ffprobe.exe"]
+    ffmpeg_files = ["ffmpeg.exe", "ffprobe.exe"]
+    missing_files = []
     
-    for file in required_files:
+    for file in ffmpeg_files:
         if not os.path.exists(file):
-            print(f"Error: Required file not found: {file}")
-            print("Please ensure ffmpeg.exe is in the current directory")
-            sys.exit(1)
+            missing_files.append(file)
     
-    for file in optional_files:
-        if not os.path.exists(file):
-            print(f"Warning: Optional file not found: {file}")
-            print("Program can run, but some features may be limited")
-
-    # 如果有 ffprobe.exe，添加它
-    if os.path.exists("ffprobe.exe"):
-        args.append("--add-data=ffprobe.exe;.")
+    if missing_files:
+        print(f"Warning: Missing files: {', '.join(missing_files)}")
+        print("Build will continue but program may not work properly")
     
-    # 如果有图标文件，添加图标参数
-    if os.path.exists("icon.ico"):
-        args.append("--icon=icon.ico")
+    args = [
+        "audio_converter_gui.py",
+        "--name=AudioConverter",
+        "--onefile",
+        "--windowed",
+        "--add-data=ffmpeg.exe;.",
+        "--add-data=ffprobe.exe;.",
+        "--clean",
+        "--noconfirm",
+        "--hidden-import=mutagen",
+        "--hidden-import=mutagen.id3",
+        "--hidden-import=mutagen.mp3",
+        "--hidden-import=mutagen.flac",
+        "--hidden-import=mutagen.oggvorbis",
+        "--hidden-import=mutagen.oggopus",
+        "--hidden-import=mutagen.mp4",
+        "--hidden-import=mutagen.wave",
+        # 注意：没有添加图标参数
+    ]
     
     try:
         PyInstaller.__main__.run(args)
@@ -40,12 +48,6 @@ def build_exe():
         
         if os.path.exists(exe_path):
             print(f"Executable created: {exe_path}")
-            print("File size:", os.path.getsize(exe_path), "bytes")
-            
-            # 复制 ffmpeg 到 dist 目录（可选，因为已经嵌入）
-            if os.path.exists("ffmpeg.exe"):
-                shutil.copy("ffmpeg.exe", "dist/ffmpeg.exe")
-                print("Copied ffmpeg.exe to dist directory")
             
     except Exception as e:
         print(f"Build failed: {e}")
